@@ -30,3 +30,10 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+
+# SQLite database file
+*.db
+
+# Vim temporary files
+*.swp
