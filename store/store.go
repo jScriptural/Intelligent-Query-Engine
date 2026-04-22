@@ -26,6 +26,7 @@ type ProfileData struct {
 }
 
 func NewDBHandler(dbPath string) *DBHandler {
+	log.Println("Setting up store")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		log.Fatal(err)

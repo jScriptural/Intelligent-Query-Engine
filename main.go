@@ -31,7 +31,6 @@ func main() {
 
 	corsConfig := map[string]string{
 		"Access-Control-Allow-Origin":  "*",
-		"Access-Control-Allow-Methods": "GET",
 	}
 	mux := handler.Routes()
 	server := http.Server{

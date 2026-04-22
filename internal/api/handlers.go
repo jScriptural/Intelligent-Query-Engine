@@ -69,6 +69,15 @@ func (h *Handler) HandleNLP(w http.ResponseWriter, r *http.Request) {
 }
 
 
+func (h *Handler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	h.sendError(
+		w,
+		http.StatusOK,
+		"success",
+		"Server is up",
+	);
+}
+
 /***************************************
 *                                      *
 *            HELPER FUNCS              *
