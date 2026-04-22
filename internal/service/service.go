@@ -41,6 +41,38 @@ var (
 )
 
 func (s *Service) Filter(ctx context.Context, q url.Values) ([]*models.Profile,int,error) {
+
+	page,limit,err := s.ValidateQuery(q);
+	if err != nil {
+		return nil,0,fmt.Errorf("Filter: %w",err);
+	}
+
+	p,total,err := s.store.GetProfiles(ctx,q,page,limit)
+	if err != nil {
+		fmt.Printf("Error: %v\n",err);
+		return nil,0, fmt.Errorf("Filter: %w", err)
+	}
+
+	if p == nil {
+		return nil,0, fmt.Errorf("Filter: %w", models.ErrNotFound)
+	}
+
+	return p,total, nil
+}
+
+
+
+
+
+
+/*****************************************
+*                                        *
+*            HELPER FUNCS                *
+*                                        *
+******************************************/
+
+func (s *Service) ValidateQuery(q url.Values) (int,int,error) {
+
 	if len(q) == 0  || (!q.Has("page") && !q.Has("limit")){
 		q.Set("page", "1")
 		q.Set("limit", "10")
@@ -65,7 +97,7 @@ func (s *Service) Filter(ctx context.Context, q url.Values) ([]*models.Profile,i
 
 	limit, err := strconv.Atoi(q.Get("limit"));
 	if err != nil {
-		return nil,0,fmt.Errorf("Filter: %w",models.ErrInvalidParam);
+		return 0,0,models.ErrInvalidParam;
 	}
 
 	if limit > 50 {
@@ -75,36 +107,26 @@ func (s *Service) Filter(ctx context.Context, q url.Values) ([]*models.Profile,i
 
 	page, err := strconv.Atoi(q.Get("page"));
 	if err != nil {
-		return nil,0,fmt.Errorf("Filter: %w",models.ErrInvalidParam);
+		return 0,0,models.ErrInvalidParam;
 	}
 
 
 	for k, v := range q {
 		if !slices.Contains(supportedFilters,k){
-			return nil,0, fmt.Errorf("Filter: %w", models.ErrInvalidParam)
+			return 0,0,models.ErrInvalidParam
 		}
 		if len(v) == 0 {
-			return nil,0,fmt.Errorf("Filter: %w", models.ErrEmptyParam)
+			return 0,0,models.ErrEmptyParam
 		}
 
 		if c,ok := constraint[k]; ok {
 			val := strings.ToLower(v[0]);
 			if !slices.Contains(c,val) {
-				return nil,0,fmt.Errorf("Filter: %w",models.ErrInvalidParam);
+				return 0,0,models.ErrInvalidParam
 			}
 		}	
 	}
 
+	return page,limit,nil;
 
-	p,total,err := s.store.GetProfiles(ctx,q,page,limit)
-	if err != nil {
-		fmt.Printf("Error: %v\n",err);
-		return nil,0, fmt.Errorf("Filter: %w", err)
-	}
-
-	if p == nil {
-		return nil,0, fmt.Errorf("Filter: %w", models.ErrNotFound)
-	}
-
-	return p,total, nil
 }
