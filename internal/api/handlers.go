@@ -42,9 +42,32 @@ func (h *Handler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleNLP(w http.ResponseWriter, r *http.Request) {
-	log.Println("NLP")
-	w.Write([]byte("NLP"))
+	query := r.URL.Query();
+	nl := query.Get("q");
+
+	if nl != "" {
+		delete(query,"q");
+	}
+
+	p,total,err := h.svc.NLProcessor(r.Context(),query,nl);
+	if err != nil {
+		log.Printf("HandleNLP: %v",err);
+		h.errorMux(w,err);
+		return;
+	}
+
+	h.sendResponse(
+		w,
+		http.StatusOK,
+		"success",
+		query,
+		total,
+		p,
+	)
+
+
 }
+
 
 /***************************************
 *                                      *
@@ -76,6 +99,13 @@ func (h *Handler) errorMux(w http.ResponseWriter, err error) {
 			"error",
 			"Profile not found",
 		)
+	case errors.Is(err,models.ErrUnInterpretable):
+		h.sendError(
+			w,
+			http.StatusBadRequest,
+			"error",
+			"Unable to interprete query",
+		)
 	default:
 		h.sendError(
 			w,
@@ -105,6 +135,7 @@ func (h *Handler)sendResponse(w http.ResponseWriter, code int, status string, q 
 	page,err2 := strconv.Atoi(q.Get("page"));
 
 	if err1 != nil || err2 != nil {
+		log.Printf("sendResponse: %v:%v",err1,err2)
 		h.errorMux(
 			w,
 			models.ErrInvalidParam,

@@ -9,6 +9,7 @@ import (
 var (
 	ErrNotFound     = errors.New("Not found")
 	ErrInvalidParam = errors.New("Unprocessable entity")
+	ErrUnInterpretable = errors.New("Unable to interpret query")
 	ErrEmptyParam   = errors.New("Bad request")
 )
 
