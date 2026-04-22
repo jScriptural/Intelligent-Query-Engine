@@ -77,7 +77,7 @@ func (s *Service) Filter(ctx context.Context, q url.Values) ([]*models.Profile, 
 
 func (s *Service) NLProcessor(ctx context.Context, query url.Values, nl string) ([]*models.Profile, int, error) {
 
-	nl = strings.ToLower(nl);
+	nl = strings.ToLower(nl)
 	fields := strings.Fields(nl)
 	if len(fields) == 0 {
 		return s.Filter(ctx, query)
@@ -105,18 +105,17 @@ func (s *Service) NLProcessor(ctx context.Context, query url.Values, nl string) 
 
 	re = regexp.MustCompile(`between\s*?(\d+)\s*?and\s*?(\d+)`)
 	if m := re.FindStringSubmatch(nl); m != nil {
-		sb.WriteString(fmt.Sprintf("min_age=%s&max_age=%s&",m[1],m[2]))
+		sb.WriteString(fmt.Sprintf("min_age=%s&max_age=%s&", m[1], m[2]))
 	}
 
 	if sb.String() == "" {
-		return nil,0,fmt.Errorf("NLProcessor: %w",models.ErrUnInterpretable)
+		return nil, 0, fmt.Errorf("NLProcessor: %w", models.ErrUnInterpretable)
 	}
 
-
 	rawQuery := strings.Trim(sb.String(), "&")
-	q,err := url.ParseQuery(rawQuery)
+	q, err := url.ParseQuery(rawQuery)
 	if err != nil {
-		return nil,0,fmt.Errorf("NLProcessor: %w",models.ErrUnInterpretable)
+		return nil, 0, fmt.Errorf("NLProcessor: %w", models.ErrUnInterpretable)
 	}
 
 	for k, v := range q {
