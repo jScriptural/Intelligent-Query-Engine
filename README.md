@@ -50,7 +50,7 @@ The `NLProcessor` follows a **Last-In-Wins** priority model. If a user provides 
 
 | Parameter | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| `nl` | string | No | The natural language query string. |
+| `q` | string | No | The natural language query string. |
 | `page` | int | No | Default: 1. |
 | `limit` | int | No | Default: 10. Max: 100. |
 | `sort_by` | string | No | `age`, `created_at`, `gender_probability`. |
