@@ -1,14 +1,44 @@
 package main
 
 import (
-	"fmt"
 	"intelliqe/store"
+	"intelliqe/internal/service"
+	"intelliqe/internal/api"
+	"os"
+	mw "intelliqe/middleware"
+	"log"
+	"net/http"
 )
 
 func main(){
-	fmt.Println("Hello World")
+	var (
+		PORT string
+		DATABASE_URL string
+	)
 
-	dbh := store.NewDBHandler("intelliqe.db");
+	if PORT = os.Getenv("PORT"); PORT == "" {
+		PORT = "8080"
+	}
 
-	_ = dbh;
+	if DATABASE_URL = os.Getenv("DATABASE_URL"); DATABASE_URL == "" {
+		DATABASE_URL = "profile.db"
+	}
+
+	dbh := store.NewDBHandler(DATABASE_URL);
+	svc := service.NewService(dbh);
+	handler := api.NewHandler(svc);
+
+	corsConfig := map[string]string {
+		"Access-Control-Allow-Origin": "*",
+		"Access-Control-Allow-Methods": "GET",
+	}
+	mux := handler.Routes();
+	server := http.Server{
+		Addr: ":"+PORT,
+		Handler: mw.CORS(mux,corsConfig),
+	}
+
+	log.Printf("Server is listening at: %v\n Database file: %v\n",server.Addr, DATABASE_URL)
+	err := server.ListenAndServe();
+	log.Fatal(err);
 }
