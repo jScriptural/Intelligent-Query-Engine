@@ -11,6 +11,7 @@ import (
 )
 
 func main() {
+	log.Printf("Main is starting")
 	var (
 		PORT         string
 		DATABASE_URL string
