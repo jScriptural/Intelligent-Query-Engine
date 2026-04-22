@@ -21,14 +21,17 @@ func main() {
 		PORT = "8080"
 	}
 
+	log.Println("PORT: ",PORT)
 	if DATABASE_URL = os.Getenv("DATABASE_URL"); DATABASE_URL == "" {
 		DATABASE_URL = "profile.db"
 	}
 
+	log.Println("db: ",DATABASE_URL)
 	dbh := store.NewDBHandler(DATABASE_URL)
 	svc := service.NewService(dbh)
 	handler := api.NewHandler(svc)
 
+	log.Println("setting up cors..")
 	corsConfig := map[string]string{
 		"Access-Control-Allow-Origin":  "*",
 	}

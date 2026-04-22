@@ -32,18 +32,22 @@ func NewDBHandler(dbPath string) *DBHandler {
 		log.Fatal(err)
 	}
 
+	log.Println("pinging db")
 	if err := db.Ping(); err != nil {
 		log.Fatal(err)
 	}
 
+	log.Println("creating table in db")
 	if err := createSchema(db); err != nil {
 		log.Fatal(err)
 	}
 
+	log.Println("seeding db")
 	if err := seedDB(db, "./store/seed_profiles.json"); err != nil {
 		log.Fatal(err)
 	}
 
+	log.Println("Store is ready")
 	return &DBHandler{DB: db}
 }
 
