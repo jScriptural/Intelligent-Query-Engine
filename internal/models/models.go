@@ -1,8 +1,15 @@
 package models
 
 import (
+	"errors"
 	"github.com/google/uuid"
 	"time"
+)
+
+var (
+	ErrNotFound     = errors.New("Not found")
+	ErrInvalidParam = errors.New("Unprocessable entity")
+	ErrEmptyParam   = errors.New("Bad request")
 )
 
 type Profile struct {
@@ -19,13 +26,15 @@ type Profile struct {
 }
 
 type Response struct {
-	Status string  `json:"status"`
-	Page   int     `json:"page"`
-	Limit  int     `json:"limit"`
-	Data   Profile `json:"data"`
+	Status string     `json:"status"`
+	Page   int        `json:"page"`
+	Limit  int        `json:"limit"`
+	Total  int        `json:"total"`
+	Data   []*Profile `json:"data"`
 }
 
 type ErrResponse struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
 }
+

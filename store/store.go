@@ -227,5 +227,8 @@ wc.WriteString(" WHERE 1=1")
 
 
 
+	if limit > totalCount {
+		q.Set("limit",fmt.Sprintf("%v",totalCount))
+	}
 	return p,totalCount,nil
 }
