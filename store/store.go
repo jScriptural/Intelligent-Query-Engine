@@ -82,22 +82,23 @@ func createSchema(db *sql.DB) error {
 }
 
 func seedDB(db *sql.DB, seedfile string) error {
+	log.Println("open seedfile")
 	f, err := seedFS.Open(seedfile)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	log.Println("open seedfile")
 
 	p := ProfileData{}
 	decoder := json.NewDecoder(f)
 
-	log.Println("seedfile decoded")
+	log.Println("decode seedfile")
 	if err := decoder.Decode(&p); err != nil {
 		return err
 	}
+	log.Printf("profiles: %#v", p)
 
-	log.Println("tx initialized")
+	log.Println("init tx: ready to write to db")
 	tx, err := db.Begin()
 	if err != nil {
 		return err
