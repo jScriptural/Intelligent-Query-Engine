@@ -10,13 +10,11 @@ import (
 	"log"
 	_ "modernc.org/sqlite"
 	"net/url"
-	//"os"
 	"strings"
 	"errors"
 	"time"
-	//"strconv"
 	"embed"
-	//"io/fs"
+	"unicode"
 )
 
 //go:embed seed_profiles.json
@@ -182,7 +180,7 @@ wc.WriteString(" WHERE 1=1")
 			args = append(args,val);
 		case k == "country_name":
 			wc.WriteString(" AND country_name = ?");
-			args = append(args,val);
+			args = append(args,d.capitalize(val));
 		}
 	}
 
@@ -211,6 +209,8 @@ wc.WriteString(" WHERE 1=1")
 	qc.WriteString(";")
 	stmt := qc.String();
 
+	log.Printf("built querystring: %v",stmt)
+	log.Printf("args: %#v",args)
 	rows,err := d.DB.QueryContext(ctx,stmt,args...);
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows){
@@ -249,4 +249,27 @@ wc.WriteString(" WHERE 1=1")
 		q.Set("limit",fmt.Sprintf("%v",totalCount))
 	}
 	return p,totalCount,nil
+}
+
+
+/********************************************
+*                                           *
+*            HELPER FUNCS                   *
+*                                           *
+*********************************************/
+
+func (d *DBHandler)capitalize(s string) string {
+	if len(strings.Fields(s)) == 0 {
+		return s;
+	}
+
+	b := []byte(s);
+	for i,v := range b {
+		if unicode.IsLetter(rune(v)) {
+			b[i] = []byte(strings.ToUpper(string(v)))[0];
+			break;
+		}
+	}
+
+	return string(b);
 }

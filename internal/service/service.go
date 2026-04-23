@@ -111,7 +111,7 @@ func (s *Service) NLProcessor(ctx context.Context, query url.Values, nl string) 
 	
 	re = regexp.MustCompile(`from\s*?([a-zA-Z-]+)`)
 	if m := re.FindStringSubmatch(nl); m != nil {
-		sb.WriteString(fmt.Sprintf("country_name=%s",m[1]));
+		sb.WriteString(fmt.Sprintf("country_name=%s&",m[1]));
 	}
 
 	if sb.String() == "" {
