@@ -87,14 +87,17 @@ func seedDB(db *sql.DB, seedfile string) error {
 		return err
 	}
 	defer f.Close()
+	log.Println("open seedfile")
 
 	p := ProfileData{}
 	decoder := json.NewDecoder(f)
 
+	log.Println("seedfile decoded")
 	if err := decoder.Decode(&p); err != nil {
 		return err
 	}
 
+	log.Println("tx initialized")
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -107,11 +110,13 @@ func seedDB(db *sql.DB, seedfile string) error {
 		VALUES (?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(name) DO NOTHING;`
 
+	log.Println("sql stmt prepared")
 	stmt, err := tx.Prepare(s)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
+	log.Println("sql stmt prepared")
 
 	for _, v := range p.Profiles {
 		id, _ := uuid.NewV7()
@@ -134,6 +139,7 @@ func seedDB(db *sql.DB, seedfile string) error {
 		}
 	}
 
+	log.Println("db seeded")
 	return tx.Commit()
 }
 
