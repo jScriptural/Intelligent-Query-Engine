@@ -10,12 +10,17 @@ import (
 	"log"
 	_ "modernc.org/sqlite"
 	"net/url"
-	"os"
+	//"os"
 	"strings"
 	"errors"
 	"time"
 	//"strconv"
+	"embed"
+	//"io/fs"
 )
+
+//go:embed seed_profiles.json
+var seedFS embed.FS
 
 type DBHandler struct {
 	DB *sql.DB
@@ -42,9 +47,10 @@ func NewDBHandler(dbPath string) *DBHandler {
 		log.Println("error creating schema")
 		log.Fatal(err)
 	}
+
 	log.Println("seeding db")
-	if err := seedDB(db, "./store/seed_profiles.json"); err != nil {
-		log.Println(err)
+	if err := seedDB(db, "seed_profiles.json"); err != nil {
+		log.Fatal(err)
 	}
 
 	log.Println("Store is ready")
@@ -76,7 +82,7 @@ func createSchema(db *sql.DB) error {
 }
 
 func seedDB(db *sql.DB, seedfile string) error {
-	f, err := os.Open(seedfile)
+	f, err := seedFS.Open(seedfile)
 	if err != nil {
 		return err
 	}
@@ -128,8 +134,7 @@ func seedDB(db *sql.DB, seedfile string) error {
 		}
 	}
 
-	tx.Commit()
-	return nil
+	return tx.Commit()
 }
 
 func (d *DBHandler) GetProfiles(ctx context.Context, q url.Values, page,limit int) ([]*models.Profile, int, error) {
