@@ -37,6 +37,7 @@ var (
 		"min_gender_probability", "country_id",
 		"age_group", "min_country_probability",
 		"sort_by", "order", "page", "limit",
+		"country_name",
 	}
 	keywordsMap = map[string]string{
 		"young":     "min_age=16&max_age=24",
@@ -106,6 +107,11 @@ func (s *Service) NLProcessor(ctx context.Context, query url.Values, nl string) 
 	re = regexp.MustCompile(`between\s*?(\d+)\s*?and\s*?(\d+)`)
 	if m := re.FindStringSubmatch(nl); m != nil {
 		sb.WriteString(fmt.Sprintf("min_age=%s&max_age=%s&", m[1], m[2]))
+	}
+	
+	re = regexp.MustCompile(`from\s*?([a-zA-Z-]+)`)
+	if m := re.FindStringSubmatch(nl); m != nil {
+		sb.WriteString(fmt.Sprintf("country_name=%s",m[1]));
 	}
 
 	if sb.String() == "" {

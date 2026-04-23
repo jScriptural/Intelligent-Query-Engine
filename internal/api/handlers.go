@@ -21,6 +21,7 @@ func NewHandler(s *service.Service) *Handler {
 
 func (h *Handler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
+	log.Printf("query: %v",query)
 
 	p,total,err := h.svc.Filter(r.Context(), query)
 
@@ -44,6 +45,8 @@ func (h *Handler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleNLP(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query();
 	nl := query.Get("q");
+	log.Printf("q: %v",nl)
+	log.Printf("query: %v",query)
 
 	if nl != "" {
 		delete(query,"q");

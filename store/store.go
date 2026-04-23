@@ -96,7 +96,6 @@ func seedDB(db *sql.DB, seedfile string) error {
 	if err := decoder.Decode(&p); err != nil {
 		return err
 	}
-	log.Printf("profiles: %#v", p)
 
 	log.Println("init tx: ready to write to db")
 	tx, err := db.Begin()
@@ -111,13 +110,12 @@ func seedDB(db *sql.DB, seedfile string) error {
 		VALUES (?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(name) DO NOTHING;`
 
-	log.Println("sql stmt prepared")
+	log.Println("prepare sql stmt")
 	stmt, err := tx.Prepare(s)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
-	log.Println("sql stmt prepared")
 
 	for _, v := range p.Profiles {
 		id, _ := uuid.NewV7()
@@ -181,6 +179,9 @@ wc.WriteString(" WHERE 1=1")
 			args = append(args,val)
 		case k == "min_country_probability":
 			wc.WriteString(" AND country_probability >= ?");
+			args = append(args,val);
+		case k == "country_name":
+			wc.WriteString(" AND country_name = ?");
 			args = append(args,val);
 		}
 	}
