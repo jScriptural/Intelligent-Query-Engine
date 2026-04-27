@@ -1,14 +1,19 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/google/uuid"
 	"intelliqe/internal/models"
 	"intelliqe/internal/service"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
-	"encoding/json"
 	"strconv"
+	"strings"
+	"unicode"
 )
 
 type Handler struct {
@@ -21,12 +26,12 @@ func NewHandler(s *service.Service) *Handler {
 
 func (h *Handler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	log.Printf("query: %v",query)
+	log.Printf("query: %v", query)
 
-	p,total,err := h.svc.Filter(r.Context(), query)
+	p, total, err := h.svc.Filter(r.Context(), query)
 
 	if err != nil {
-		log.Printf("Error: %s\n",err)
+		log.Printf("Error: %s\n", err)
 		h.errorMux(w, err)
 		return
 	}
@@ -43,20 +48,20 @@ func (h *Handler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleNLP(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query();
-	nl := query.Get("q");
-	log.Printf("q: %v",nl)
-	log.Printf("query: %v",query)
+	query := r.URL.Query()
+	nl := query.Get("q")
+	log.Printf("q: %v", nl)
+	log.Printf("query: %v", query)
 
 	if nl != "" {
-		delete(query,"q");
+		delete(query, "q")
 	}
 
-	p,total,err := h.svc.NLProcessor(r.Context(),query,nl);
+	p, total, err := h.svc.NLProcessor(r.Context(), query, nl)
 	if err != nil {
-		log.Printf("HandleNLP: %v",err);
-		h.errorMux(w,err);
-		return;
+		log.Printf("HandleNLP: %v", err)
+		h.errorMux(w, err)
+		return
 	}
 
 	h.sendResponse(
@@ -68,9 +73,7 @@ func (h *Handler) HandleNLP(w http.ResponseWriter, r *http.Request) {
 		p,
 	)
 
-
 }
-
 
 func (h *Handler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 	h.sendError(
@@ -78,7 +81,138 @@ func (h *Handler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 		http.StatusOK,
 		"success",
 		"Server is up",
-	);
+	)
+}
+
+func (h *Handler) HandleProfileCreation(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	var data models.PostData
+	if err := h.decode(r.Body, &data); err != nil {
+		log.Printf("%v", err)
+		h.errorMux(
+			w,
+			fmt.Errorf("HandleProfileCreation: %w", models.Err502),
+		)
+
+		return
+	}
+
+	log.Printf("postData: %v", data)
+	if strings.TrimSpace(data.Name) == "" {
+		h.errorMux(
+			w,
+			fmt.Errorf("HandleProfileCreation: %w", models.ErrEmptyParam),
+		)
+		return
+	}
+	data.Name = strings.ToLower(strings.TrimSpace(data.Name))
+
+	p, isNew, err := h.svc.GetOrCreateProfile(r.Context(), data.Name)
+
+	if err != nil {
+		log.Printf("%v", err)
+		h.errorMux(w, err)
+		return
+	}
+
+	q := url.Values{}
+	q.Set("limit", "1")
+	q.Set("page", "1")
+	total := 1
+	if isNew {
+		h.sendResponse(
+			w,
+			http.StatusCreated,
+			"success",
+			q,
+			total,
+			[]*models.Profile{p},
+		)
+		return
+	}
+
+	h.sendResponse(
+		w,
+		http.StatusCreated,
+		"success",
+		q,
+		total,
+		[]*models.Profile{p},
+	)
+	return
+}
+
+func (h *Handler) HandleProfileRetrievalByID(w http.ResponseWriter, r *http.Request) {
+	id := h.removeAllWhitespaces(r.PathValue("id"))
+	if id == "" {
+		h.errorMux(
+			w,
+			fmt.Errorf("HandleProfileRetrievalByID: %w", models.ErrEmptyParam),
+		)
+		return
+	}
+
+	log.Printf("%v", id)
+	p, err := h.svc.RetrieveProfileByID(r.Context(), id)
+	if err != nil {
+		log.Printf("%v", err)
+		h.errorMux(w, err)
+		return
+	}
+
+	q := url.Values{}
+	q.Set("limit", "1")
+	q.Set("page", "1")
+	total := 1
+	h.sendResponse(
+		w,
+		http.StatusOK,
+		"success",
+		q,
+		total,
+		[]*models.Profile{p},
+	)
+}
+
+func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Request) {
+
+	id := r.PathValue("id")
+	id = h.removeAllWhitespaces(id)
+
+	if id == "" {
+		h.errorMux(
+			w,
+			fmt.Errorf("HandleProfileDeletion: %w", models.ErrEmptyParam),
+		)
+		return
+	}
+	_, err := uuid.Parse(id)
+	if err != nil {
+		log.Printf("%v", err)
+		h.errorMux(
+			w,
+			fmt.Errorf("HandleProfileDeletion: %w", models.ErrInvalidParam),
+		)
+		return
+	}
+
+	err = h.svc.DeleteProfile(r.Context(), id)
+	if err != nil {
+		log.Printf("HandleProfileDeletion: %s", err)
+		h.errorMux(w, err)
+	}
+
+	log.Printf("Deleted: %v", id)
+	q := url.Values{}
+	h.sendResponse(
+		w,
+		http.StatusNoContent,
+		"success",
+		q,
+		0,
+		nil,
+	)
+
 }
 
 /***************************************
@@ -104,6 +238,13 @@ func (h *Handler) errorMux(w http.ResponseWriter, err error) {
 			"error",
 			"Invalid parameter type",
 		)
+	case errors.Is(err, models.Err502):
+		h.sendError(
+			w,
+			http.StatusBadGateway,
+			"error",
+			"Upstream error",
+		)
 	case errors.Is(err, models.ErrNotFound):
 		h.sendError(
 			w,
@@ -111,7 +252,7 @@ func (h *Handler) errorMux(w http.ResponseWriter, err error) {
 			"error",
 			"Profile not found",
 		)
-	case errors.Is(err,models.ErrUnInterpretable):
+	case errors.Is(err, models.ErrUnInterpretable):
 		h.sendError(
 			w,
 			http.StatusBadRequest,
@@ -141,18 +282,18 @@ func (h *Handler) sendError(w http.ResponseWriter, code int, status, msg string)
 	}
 }
 
-func (h *Handler)sendResponse(w http.ResponseWriter, code int, status string, q url.Values, total int, data []*models.Profile) {
-	
-	limit,err1 := strconv.Atoi(q.Get("limit"));
-	page,err2 := strconv.Atoi(q.Get("page"));
+func (h *Handler) sendResponse(w http.ResponseWriter, code int, status string, q url.Values, total int, data []*models.Profile) {
+
+	limit, err1 := strconv.Atoi(q.Get("limit"))
+	page, err2 := strconv.Atoi(q.Get("page"))
 
 	if err1 != nil || err2 != nil {
-		log.Printf("sendResponse: %v:%v",err1,err2)
+		log.Printf("sendResponse: %v:%v", err1, err2)
 		h.errorMux(
 			w,
 			models.ErrInvalidParam,
 		)
-		return;
+		return
 	}
 
 	res := models.Response{
@@ -169,4 +310,23 @@ func (h *Handler)sendResponse(w http.ResponseWriter, code int, status string, q 
 	if err := json.NewEncoder(w).Encode(res); err != nil {
 		log.Printf("Unable to write response: %v", err)
 	}
+}
+
+func (h *Handler) decode(r io.Reader, v any) error {
+	decoder := json.NewDecoder(r)
+
+	if err := decoder.Decode(v); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (h *Handler) removeAllWhitespaces(s string) string {
+	trim := strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
+	return trim
 }

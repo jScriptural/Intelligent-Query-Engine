@@ -1,19 +1,19 @@
 package store
 
 import (
-	"database/sql"
-	"encoding/json"
-	"fmt"
 	"context"
+	"database/sql"
+	"embed"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/google/uuid"
 	"intelliqe/internal/models"
 	"log"
 	_ "modernc.org/sqlite"
 	"net/url"
 	"strings"
-	"errors"
 	"time"
-	"embed"
 	"unicode"
 )
 
@@ -140,90 +140,113 @@ func seedDB(db *sql.DB, seedfile string) error {
 	return tx.Commit()
 }
 
-func (d *DBHandler) GetProfiles(ctx context.Context, q url.Values, page,limit int) ([]*models.Profile, int, error) {
+func (d *DBHandler) SaveProfile(ctx context.Context, p *models.Profile) error {
+	query := `INSERT INTO profile
+  (id,name,gender,gender_probability,age,age_group,country_id,country_name,country_probability,created_at)
+  VALUES (?,?,?,?,?,?,?,?,?,?);`
+
+	_, err := d.DB.ExecContext(
+		ctx,
+		query,
+		p.ID,
+		p.Name,
+		p.Gender,
+		p.GenderProbability,
+		p.Age,
+		p.AgeGroup,
+		p.CountryID,
+		p.CountryName,
+		p.CountryProbability,
+		p.CreatedAt)
+
+	if err != nil {
+		return fmt.Errorf("Failed to save profile: %w", err)
+	}
+
+	return nil
+}
+
+func (d *DBHandler) GetProfiles(ctx context.Context, q url.Values, page, limit int) ([]*models.Profile, int, error) {
 	var (
 		wc strings.Builder
 		qc strings.Builder
 	)
-	
+
 	qc.WriteString(`SELECT id,name,gender,gender_probability,age,age_group,country_id,country_name,country_probability,created_at
 FROM profile`)
-wc.WriteString(" WHERE 1=1")
+	wc.WriteString(" WHERE 1=1")
 
 	var args []any
 	for k, v := range q {
 		//k = strings.ToLower(k)
-		val := v[0];
+		val := v[0]
 		switch {
 		case k == "min_age":
 			wc.WriteString(" AND age >= ?")
-			args = append(args,val)
+			args = append(args, val)
 		case k == "max_age":
 			wc.WriteString(" AND age <= ?")
-			args = append(args,val)
+			args = append(args, val)
 		case k == "min_gender_probability":
 			wc.WriteString(" AND gender_probability >= ?")
-			args = append(args,val)
+			args = append(args, val)
 		case k == "gender":
 			wc.WriteString(" AND gender = ?")
-		  val = strings.ToLower(val)
-			args = append(args,val)
+			val = strings.ToLower(val)
+			args = append(args, val)
 		case k == "country_id":
 			wc.WriteString(" AND country_id = ?")
-			args = append(args,strings.ToUpper(val))
+			args = append(args, strings.ToUpper(val))
 		case k == "age_group":
 			wc.WriteString(" AND age_group = ?")
-		  val = strings.ToLower(val)
-			args = append(args,val)
+			val = strings.ToLower(val)
+			args = append(args, val)
 		case k == "min_country_probability":
-			wc.WriteString(" AND country_probability >= ?");
-			args = append(args,val);
+			wc.WriteString(" AND country_probability >= ?")
+			args = append(args, val)
 		case k == "country_name":
-			wc.WriteString(" AND country_name = ?");
-			args = append(args,d.capitalize(val));
+			wc.WriteString(" AND country_name = ?")
+			args = append(args, d.capitalize(val))
 		}
 	}
 
-	totalCount := 0;
-	sqlCount := "SELECT COUNT(*) FROM profile"+wc.String();
+	totalCount := 0
+	sqlCount := "SELECT COUNT(*) FROM profile" + wc.String()
 
-	err := d.DB.QueryRowContext(ctx,sqlCount,args...).Scan(&totalCount);
+	err := d.DB.QueryRowContext(ctx, sqlCount, args...).Scan(&totalCount)
 	if err != nil {
-		return nil,0,fmt.Errorf("GetProfiles: %w",err);
+		return nil, 0, fmt.Errorf("GetProfiles: %w", err)
 	}
 
-
-	qc.WriteString(wc.String());
+	qc.WriteString(wc.String())
 	if q.Has("sort_by") && q.Has("order") {
-		sort_by := strings.ToLower(q.Get("sort_by"));
-		order := q.Get("order");
-		s := fmt.Sprintf(" ORDER BY %s %s",sort_by,order)
+		sort_by := strings.ToLower(q.Get("sort_by"))
+		order := q.Get("order")
+		s := fmt.Sprintf(" ORDER BY %s %s", sort_by, order)
 		qc.WriteString(s)
 	}
 
-
-
-	offset := (page-1) * limit;
-	qc.WriteString(fmt.Sprintf(" LIMIT %v OFFSET %v",limit, offset))
+	offset := (page - 1) * limit
+	qc.WriteString(fmt.Sprintf(" LIMIT %v OFFSET %v", limit, offset))
 
 	qc.WriteString(";")
-	stmt := qc.String();
+	stmt := qc.String()
 
-	log.Printf("built querystring: %v",stmt)
-	log.Printf("args: %#v",args)
-	rows,err := d.DB.QueryContext(ctx,stmt,args...);
+	log.Printf("built querystring: %v", stmt)
+	log.Printf("args: %#v", args)
+	rows, err := d.DB.QueryContext(ctx, stmt, args...)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows){
-			return nil,0,fmt.Errorf("GetProfiles: %w",models.ErrNotFound);
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, 0, fmt.Errorf("GetProfiles: %w", models.ErrNotFound)
 		}
-	
-		return nil,0,fmt.Errorf("GetProfiles: %w",err);
+
+		return nil, 0, fmt.Errorf("GetProfiles: %w", err)
 	}
-	defer rows.Close();
+	defer rows.Close()
 
 	p := []*models.Profile{}
 	for rows.Next() {
-		t := models.Profile{};
+		t := models.Profile{}
 		rows.Scan(
 			&t.ID,
 			&t.Name,
@@ -236,21 +259,102 @@ wc.WriteString(" WHERE 1=1")
 			&t.CountryProbability,
 			&t.CreatedAt,
 		)
-		p = append(p,&t);
+		p = append(p, &t)
 	}
 	if rows.Err() != nil {
-		log.Printf("Err: %v",err)
-		return nil,0,fmt.Errorf("GetProfiles: %w",rows.Err);
+		log.Printf("Err: %v", err)
+		return nil, 0, fmt.Errorf("GetProfiles: %w", rows.Err)
 	}
-
-
 
 	if limit > totalCount {
-		q.Set("limit",fmt.Sprintf("%v",totalCount))
+		q.Set("limit", fmt.Sprintf("%v", totalCount))
 	}
-	return p,totalCount,nil
+	return p, totalCount, nil
 }
 
+func (d *DBHandler) GetProfileByName(ctx context.Context, name string) (*models.Profile, error) {
+	query := `SELECT id,name,gender,gender_probability,age,age_group,country_id,country_name,country_probability,created_at
+	FROM profile
+	WHERE name = ? LIMIT 1;`
+
+	p := models.Profile{}
+	var idStr string
+	err := d.DB.QueryRowContext(ctx, query, name).Scan(
+		&idStr,
+		&p.Name,
+		&p.Gender,
+		&p.GenderProbability,
+		&p.Age,
+		&p.AgeGroup,
+		&p.CountryID,
+		&p.CountryName,
+		&p.CountryProbability,
+		&p.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, models.ErrNotFound
+		}
+		return nil, fmt.Errorf("GetProfileByName(name:%v) %w", name, err)
+	}
+
+	p.ID, err = uuid.Parse(idStr)
+	if err != nil {
+		return nil, fmt.Errorf("GetProfileByName(name: %v): %w", name, err)
+	}
+	return &p, nil
+}
+
+func (d *DBHandler) GetProfileByID(ctx context.Context, id string) (*models.Profile, error) {
+	query := `SELECT id,name,gender,gender_probability,age,age_group,country_id,country_name,country_probability,created_at
+  FROM profile
+  WHERE id = ? LIMIT 1;`
+
+	var (
+		p     models.Profile
+		idStr string
+	)
+	err := d.DB.QueryRowContext(ctx, query, id).Scan(&idStr,
+		&p.Name,
+		&p.Gender, &p.GenderProbability, &p.Age, &p.AgeGroup,
+		&p.CountryID,
+		&p.CountryName,
+		&p.CountryProbability,
+		&p.CreatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("GetProfileByID(id: %v): %w", id, models.ErrNotFound)
+		}
+		return nil, fmt.Errorf("GetProfileByID(id: %v): %w", id, err)
+	}
+	p.ID, err = uuid.Parse(idStr)
+	if err != nil {
+		return nil, fmt.Errorf("GetProfileByID(id: %v): %w", id, err)
+	}
+
+	return &p, nil
+}
+
+func (d *DBHandler) DeleteProfileByID(ctx context.Context, id string) error {
+	query := `DELETE FROM profile WHERE id = ?;`
+	res, err := d.DB.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("DeleteProfileByID(id: %v): %w", id, err)
+	}
+
+	rowsDeleted, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("DeleteProfileByID(id: %v): %w", id, err)
+	}
+
+	if rowsDeleted == 0 {
+		return fmt.Errorf("DeleteProfileByID: %w", models.ErrNotFound)
+	}
+
+	return nil
+}
 
 /********************************************
 *                                           *
@@ -258,18 +362,18 @@ wc.WriteString(" WHERE 1=1")
 *                                           *
 *********************************************/
 
-func (d *DBHandler)capitalize(s string) string {
+func (d *DBHandler) capitalize(s string) string {
 	if len(strings.Fields(s)) == 0 {
-		return s;
+		return s
 	}
 
-	b := []byte(s);
-	for i,v := range b {
+	b := []byte(s)
+	for i, v := range b {
 		if unicode.IsLetter(rune(v)) {
-			b[i] = []byte(strings.ToUpper(string(v)))[0];
-			break;
+			b[i] = []byte(strings.ToUpper(string(v)))[0]
+			break
 		}
 	}
 
-	return string(b);
+	return string(b)
 }

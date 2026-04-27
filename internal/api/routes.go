@@ -9,7 +9,12 @@ func (h *Handler) Routes() *http.ServeMux {
 
 	mux.HandleFunc("GET /", h.HandleHealthCheck)
 	mux.HandleFunc("GET /api/profiles", h.HandleQuery)
+	mux.HandleFunc("GET /api/profiles/{id}", h.HandleProfileRetrievalByID)
 	mux.HandleFunc("GET /api/profiles/search", h.HandleNLP)
+	mux.HandleFunc("POST /api/profiles", h.HandleProfileCreation)
+	mux.HandleFunc("DELETE /api/profiles/{id}", h.HandleProfileDeletionByID)
+
+
 
 	return mux
 }
