@@ -1,21 +1,24 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"intelliqe/internal/models"
+	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
-	"time"
-	"encoding/json"
-	"log"
-	"errors"
 	"sync"
-	"github.com/google/uuid"
+	"time"
 )
 
 type Store interface {
@@ -24,7 +27,12 @@ type Store interface {
 	GetProfileByName(ctx context.Context, name string) (*models.Profile, error)
 	GetProfileByID(ctx context.Context, id string) (*models.Profile, error)
 	DeleteProfileByID(ctx context.Context, id string) error
-	GetCountryName(ISOcode string) (string,bool)
+	GetCountryName(ISOcode string) (string, bool)
+	UpsertUserSession(ctx context.Context, u *models.UserProfile, tk string) error
+	RevokeTokenByID(ctx context.Context, uid string) error
+	GetUserProfileByID(ctx context.Context, id string) (*models.UserProfile, error)
+	GetToken(ctx context.Context, id string) (*models.RefreshToken, error)
+	UpdateUserTokenByID(ctx context.Context, userID, token string) error
 }
 
 type Service struct {
@@ -35,7 +43,7 @@ type Service struct {
 func NewService(s Store) *Service {
 	return &Service{
 		store:  s,
-		client: &http.Client{Timeout: 10 * time.Second},
+		client: &http.Client{Timeout: 20 * time.Second},
 	}
 }
 
@@ -240,6 +248,184 @@ func (s *Service) DeleteProfile(ctx context.Context, id string) error {
 	return nil
 }
 
+func (s *Service) GetAuthCredential(ctx context.Context, gtc models.GitTmpCode) (*models.AuthCredential, error) {
+
+	url := "https://github.com/login/oauth/access_token"
+
+	clientID := os.Getenv("GITHUB_CLIENT_ID")
+	clientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
+
+	val := map[string]string{
+		"client_id":     clientID,
+		"client_secret": clientSecret,
+		"code":          gtc.Code,
+		"code_verifier": gtc.Verifier,
+	}
+
+	postData, _ := json.Marshal(val)
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		url,
+		bytes.NewBuffer(postData),
+	)
+	if err != nil {
+		log.Println(err)
+		return nil, fmt.Errorf("GetAuthCredential: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	res, err := s.client.Do(req)
+	if err != nil {
+		log.Println(err)
+		return nil, fmt.Errorf("GetAuthCredential: %w", models.Err502)
+	}
+	defer res.Body.Close()
+
+	ghRes := models.GithubTokenResponse{}
+	err = json.NewDecoder(res.Body).Decode(&ghRes)
+	if err != nil {
+		return nil, fmt.Errorf("GetAuthCredemtial: %w", err)
+	}
+
+	log.Printf("ghRes: %#v", ghRes)
+
+	if ghRes.Error != "" {
+		log.Println(ghRes.ErrorDescription)
+		return nil, fmt.Errorf("GetAuthCredential: %w", models.Err502)
+	}
+
+	//GET GITHUB PROFILE
+
+	req, err = http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		"https://api.github.com/user",
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetAuthCredential: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+ghRes.AccessToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "insighta-lab+")
+
+	res, err = s.client.Do(req)
+	if err != nil || res == nil || res.StatusCode != http.StatusOK {
+		log.Println(err)
+		if res != nil {
+			log.Println(res.Status)
+		}
+		return nil, fmt.Errorf("GetAuthCredential: %w", models.Err502)
+	}
+	defer res.Body.Close()
+
+	ghProfile := models.GithubProfile{}
+	err = json.NewDecoder(res.Body).Decode(&ghProfile)
+	if err != nil {
+		return nil, fmt.Errorf("GetAuthCredemtial: %w", err)
+	}
+
+	log.Printf("github profile: %#v", ghProfile)
+	if ghProfile.Email == "" {
+		email, err := s.fetchPrimaryEmail(ctx, ghRes.AccessToken)
+		if err == nil {
+			ghProfile.Email = email
+		}
+	}
+	log.Println("Creating user profile")
+	id, _ := uuid.NewV7()
+	log.Printf("Auth: id - %v", id.String())
+	user := models.UserProfile{
+		ID:          id,
+		GithubID:    strconv.FormatInt(ghProfile.GithubID, 10),
+		Username:    ghProfile.Username,
+		Email:       ghProfile.Email,
+		AvatarURL:   ghProfile.AvatarURL,
+		Role:        "analyst",
+		IsActive:    true,
+		LastLoginAt: time.Now().UTC(),
+		CreatedAt:   time.Now().UTC(),
+	}
+
+	log.Printf("user: %#v", user)
+	log.Println("Generating credentials")
+	authCred, err := s.GenerateCredential(user.ID, user.Username, "analyst")
+	if err != nil {
+		log.Println(err)
+		return nil, fmt.Errorf("GetAuthCredential: %w", err)
+	}
+
+	log.Println("Saving user and refresh token to db")
+	if err := s.store.UpsertUserSession(ctx, &user, authCred.RefreshToken); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("GetAuthCredential: %w", models.ErrDeadlineExceeded)
+		}
+
+		return nil, fmt.Errorf("GetAuthCredential: %w", err)
+	}
+	log.Println("return cred")
+	return authCred, nil
+
+}
+
+func (s *Service) RevokeToken(ctx context.Context, u *models.UserID) error {
+	err := s.store.RevokeTokenByID(ctx, u.UserID)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Service) UpdateUserToken(ctx context.Context,id, token string) error {
+
+	err := s.store.UpdateUserTokenByID(ctx,id,token);
+	if err != nil {
+		return err;
+	}
+
+	return nil;
+}
+
+func (s *Service) ValidateToken(ctx context.Context, tk string, claims *models.RefreshClaims) (*models.UserProfile, error) {
+
+	secretKey := []byte(os.Getenv("JWT_SECRET_KEY"))
+	token, err := jwt.ParseWithClaims(tk, claims, func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, models.ErrUnauthorized
+		}
+		return secretKey, nil
+	})
+
+	if err != nil || !token.Valid {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, models.ErrExpiredToken
+		}
+		return nil, models.ErrUnauthorized
+	}
+
+	former, err := s.store.GetToken(ctx, claims.UserID.String())
+	if err != nil {
+		return nil, fmt.Errorf("ValidateToken: %w", err)
+	}
+	if former.Token != tk {
+		return nil, fmt.Errorf("ValidateToken: token mismatch: %w", models.ErrUnauthorized)
+	}
+
+	user, err := s.store.GetUserProfileByID(ctx, claims.UserID.String())
+	if err != nil {
+		return nil, fmt.Errorf("ValidateToken: %w", err)
+	}
+
+	return user, nil
+}
+
 /*****************************************
 *                                        *
 *            HELPER FUNCS                *
@@ -409,9 +595,9 @@ func (s *Service) assembleProfile(name string, gRes *models.GenderizeResponse, a
 	p.AgeGroup = aRes.GetAgeGroup()
 
 	c := nRes.GetMostProbableNationality()
-	cn,ok := s.store.GetCountryName(c.CountryID);
+	cn, ok := s.store.GetCountryName(c.CountryID)
 	if !ok {
-		cn = "";
+		cn = ""
 	}
 	p.CountryID = c.CountryID
 	p.CountryName = cn
@@ -419,4 +605,70 @@ func (s *Service) assembleProfile(name string, gRes *models.GenderizeResponse, a
 	p.CreatedAt = time.Now().UTC()
 
 	return &p
+}
+
+func (s *Service) GenerateCredential(id uuid.UUID, username, role string) (*models.AuthCredential, error) {
+	log.Printf("GenerateCred: id - %v", id.String())
+	secretKey := []byte(os.Getenv("JWT_SECRET_KEY"))
+
+	accessClaims := models.AccessClaims{
+		UserID:   id,
+		Role:     role,
+		Username: username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(3 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   id.String(),
+		},
+	}
+	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims).SignedString(secretKey)
+	if err != nil {
+		return nil, err
+	}
+
+	refreshClaims := models.RefreshClaims{
+		UserID: id,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(120 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   id.String(),
+		},
+	}
+	refreshToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims).SignedString(secretKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return &models.AuthCredential{
+		Status:       "success",
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken}, nil
+}
+
+func (s *Service) fetchPrimaryEmail(ctx context.Context, token string) (string, error) {
+	req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user/emails", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	res, err := s.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+
+	var emails []struct {
+		Email    string `json:"email"`
+		Primary  bool   `json:"primary"`
+		Verified bool   `json:"verified"`
+	}
+
+	if err := json.NewDecoder(res.Body).Decode(&emails); err != nil {
+		return "", err
+	}
+
+	for _, e := range emails {
+		if e.Verified && e.Primary {
+			return e.Email, nil
+		}
+	}
+	return "", fmt.Errorf("no primary verified email found")
 }

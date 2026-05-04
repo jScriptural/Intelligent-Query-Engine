@@ -69,6 +69,26 @@ func createSchema(db *sql.DB) error {
 		created_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 	);
 
+	CREATE TABLE IF NOT EXISTS user (
+		id BLOB PRIMARY KEY,
+		github_id TEXT UNIQUE NOT NULL,
+		username TEXT,
+		email TEXT UNIQUE,
+		avatar_url TEXT,
+		is_active BOOLEAN DEFAULT TRUE,
+		role TEXT NOT NULL DEFAULT 'analyst',
+		last_login_at DATETIME NOT NULL DEFAULT(CURRENT_TIMESTAMP),
+		created_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+	);
+
+	CREATE TABLE IF NOT EXISTS refresh_token(
+		id BLOB PRIMARY KEY,
+		github_id TEXT UNIQUE,
+		token  TEXT NOT NULL,
+		FOREIGN KEY (github_id) REFERENCES user(github_id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_token ON refresh_token(token);
 	CREATE INDEX IF NOT EXISTS idx_profile_age_group ON profile(age_group);
 	CREATE INDEX IF NOT EXISTS idx_profile_age ON profile(age);
 	CREATE INDEX IF NOT EXISTS idx_profile_gender ON profile(gender);
@@ -356,11 +376,150 @@ func (d *DBHandler) DeleteProfileByID(ctx context.Context, id string) error {
 	return nil
 }
 
-/********************************************
-*                                           *
-*            HELPER FUNCS                   *
-*                                           *
-*********************************************/
+func (d *DBHandler) UpsertUserSession(ctx context.Context, u *models.UserProfile, refreshToken string) error {
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("transaction begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	userStmt := `INSERT INTO user (
+        id, github_id, username, email, avatar_url,is_active, role, last_login_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(github_id) 
+    DO UPDATE SET 
+				id = EXCLUDED.id,
+        last_login_at = EXCLUDED.last_login_at,
+        avatar_url = EXCLUDED.avatar_url,
+        username = EXCLUDED.username,
+        email = EXCLUDED.email;`
+
+	_, err = tx.ExecContext(
+		ctx,
+		userStmt,
+		u.ID,
+		u.GithubID,
+		u.Username,
+		u.Email,
+		u.AvatarURL,
+		u.IsActive,
+		u.Role,
+		u.LastLoginAt,
+		u.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("UpsertUser: %w", err)
+	}
+
+	tokenStmt := `INSERT INTO refresh_token (id, github_id, token)
+    VALUES (?, ?, ?)
+    ON CONFLICT(github_id)
+    DO UPDATE SET 
+        token = EXCLUDED.token,
+        id = EXCLUDED.id;`
+
+	_, err = tx.ExecContext(ctx, tokenStmt, u.ID, u.GithubID, refreshToken)
+	if err != nil {
+		return fmt.Errorf("Refreshtoken: %w", err)
+	}
+	log.Println("Refresh token saved to db")
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("UpsertUserSession: %w", err)
+	}
+
+	return nil
+}
+
+func (d *DBHandler) RevokeTokenByID(ctx context.Context, uid string) error {
+	stmt := `DELETE FROM refresh_token WHERE id = ?;`
+	stmt2 := `UPDATE user SET is_active = ? WHERE id = ?;`
+
+	_, err := d.DB.ExecContext(ctx, stmt, uid)
+	if err != nil {
+		return err
+	}
+
+	_, err = d.DB.ExecContext(ctx, stmt2, true, uid)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (d *DBHandler) GetToken(ctx context.Context, id string) (*models.RefreshToken, error) {
+	tk := models.RefreshToken{}
+	stmt := `SELECT id,github_id,token
+	FROM refresh_token
+	WHERE id = ?
+	LIMIT 1;`
+
+	err := d.DB.QueryRowContext(ctx, stmt, id).Scan(&tk.UserID, &tk.GithubID, &tk.Token)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("GetToken: %w", models.ErrNoSession)
+		}
+		return nil, fmt.Errorf("GetToken: %w", err)
+	}
+
+	return &tk, nil
+}
+
+func (d *DBHandler) GetUserProfileByID(ctx context.Context, id string) (*models.UserProfile, error) {
+	u := models.UserProfile{}
+	stmt := `SELECT id,github_id,username,email,avatar_url,is_active,role,last_login_at,created_at
+	FROM user
+	WhERE id = ?
+	LIMIT 1;`
+
+	err := d.DB.QueryRowContext(ctx, stmt, id).Scan(
+		&u.ID,
+		&u.GithubID,
+		&u.Username,
+		&u.Email,
+		&u.AvatarURL,
+		&u.IsActive,
+		&u.Role,
+		&u.LastLoginAt,
+		&u.CreatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("GetUserProfile: %w", models.ErrNoUser)
+		}
+		return nil, fmt.Errorf("GetUserProfile: %w", err)
+	}
+
+	return &u, nil
+}
+
+func (d *DBHandler) UpdateUserTokenByID(ctx context.Context, id, tk string) error {
+	stmt := `UPDATE refresh_token 
+	SET token = ? 
+	WHERE id = ?;`;
+
+	_,err := d.DB.ExecContext(
+		ctx,
+		stmt,
+		tk,
+		id,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("UpdateUserTokenByID: %w",models.ErrNoSession);
+		}
+		return fmt.Errorf("UpdateUserTokenByID: %w",err);
+	}
+	return nil;
+}
+
+
+/*************************************
+*                                    *
+*            HELPER FUNCS            *
+*                                    *
+*************************************/
 
 func (d *DBHandler) capitalize(s string) string {
 	if len(strings.Fields(s)) == 0 {

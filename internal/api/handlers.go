@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"math"
 	"strconv"
 	"strings"
 	"unicode"
@@ -25,6 +26,8 @@ func NewHandler(s *service.Service) *Handler {
 }
 
 func (h *Handler) HandleQuery(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Ctx: %#v", r.Context())
+
 	query := r.URL.Query()
 	log.Printf("query: %v", query)
 
@@ -85,6 +88,12 @@ func (h *Handler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleProfileCreation(w http.ResponseWriter, r *http.Request) {
+	role := r.Context().Value("role")
+	if role != "admin" {
+		log.Println("role: ", role)
+		h.errorMux(w, models.ErrForbidden)
+		return
+	}
 	defer r.Body.Close()
 	var data models.PostData
 	if err := h.decode(r.Body, &data); err != nil {
@@ -133,7 +142,7 @@ func (h *Handler) HandleProfileCreation(w http.ResponseWriter, r *http.Request) 
 
 	h.sendResponse(
 		w,
-		http.StatusCreated,
+		http.StatusOK,
 		"success",
 		q,
 		total,
@@ -175,7 +184,12 @@ func (h *Handler) HandleProfileRetrievalByID(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Request) {
-
+	role := r.Context().Value("role")
+	if role != "admin" {
+		log.Println("role: ", role)
+		h.errorMux(w, models.ErrForbidden)
+		return
+	}
 	id := r.PathValue("id")
 	id = h.removeAllWhitespaces(id)
 
@@ -215,6 +229,91 @@ func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Reque
 
 }
 
+func (h *Handler) HandleGithubOAuth(w http.ResponseWriter, r *http.Request) {
+	tmpCode := models.GitTmpCode{}
+	err := h.decode(r.Body, &tmpCode)
+	if err != nil {
+		log.Println(err)
+		h.errorMux(
+			w,
+			fmt.Errorf("HandleGithubOAuth: %w", models.ErrEmptyBody),
+		)
+		return
+	}
+
+	token, err := h.svc.GetAuthCredential(r.Context(), tmpCode)
+	if err != nil {
+		log.Println(err)
+		h.errorMux(w, err)
+		return
+	}
+
+	h.sendToken(w, http.StatusOK, token)
+}
+
+func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	userID := models.UserID{}
+	err := h.decode(r.Body, &userID)
+	if err != nil {
+		log.Printf("%#v\n", err)
+		h.errorMux(
+			w,
+			err,
+		)
+		return
+	}
+
+	err = h.svc.RevokeToken(r.Context(), &userID)
+	if err != nil {
+		log.Printf("%#v\n", err)
+		h.errorMux(w, err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) HandleSessionRefresh(w http.ResponseWriter, r *http.Request) {
+	refreshToken := models.RefreshToken{}
+	err := h.decode(r.Body, &refreshToken)
+	if err != nil {
+		log.Println(err)
+		h.errorMux(
+			w,
+			models.ErrEmptyBody,
+		)
+		return
+	}
+
+	claims := models.RefreshClaims{}
+
+	user, err := h.svc.ValidateToken(r.Context(), refreshToken.Token, &claims)
+	if err != nil {
+		log.Println(err)
+		h.errorMux(w, err)
+		return
+	}
+
+	cred, err := h.svc.GenerateCredential(user.ID, user.Username, user.Role)
+	if err != nil {
+		log.Printf("%v", err)
+		h.errorMux(w, err)
+		return
+	}
+
+	err = h.svc.UpdateUserToken(r.Context(),user.ID.String(),cred.RefreshToken)
+	if err != nil {
+		log.Println(err)
+		h.errorMux(w, err)
+		return
+	}
+
+	h.sendToken(w, http.StatusOK, cred)
+}
+
+func (h *Handler) HandleFileExport(w htpp.ResponseWriter, r *http.Request) {
+	
+}
 /***************************************
 *                                      *
 *            HELPER FUNCS              *
@@ -259,6 +358,55 @@ func (h *Handler) errorMux(w http.ResponseWriter, err error) {
 			"error",
 			"Unable to interprete query",
 		)
+	case errors.Is(err, models.ErrEmptyBody):
+		h.sendError(
+			w,
+			http.StatusBadRequest,
+			"error",
+			"Empty Request body",
+		)
+	case errors.Is(err, models.ErrDeadlineExceeded):
+		h.sendError(
+			w,
+			http.StatusBadRequest,
+			"error",
+			"Request timeout",
+		)
+	case errors.Is(err, models.ErrUnauthorized):
+		h.sendError(
+			w,
+			http.StatusUnauthorized,
+			"error",
+			"Operation not authorized",
+		)
+	case errors.Is(err, models.ErrExpiredToken):
+		h.sendError(
+			w,
+			http.StatusUnauthorized,
+			"error",
+			"Session expired",
+		)
+	case errors.Is(err, models.ErrForbidden):
+		h.sendError(
+			w,
+			http.StatusForbidden,
+			"error",
+			"Permission denied",
+		)
+	case errors.Is(err, models.ErrNoSession):
+		h.sendError(
+			w,
+			http.StatusUnauthorized,
+			"error",
+			"No session",
+		)
+	case errors.Is(err, models.ErrNoUser):
+		h.sendError(
+			w,
+			http.StatusUnauthorized,
+			"error",
+			"No user",
+		)
 	default:
 		h.sendError(
 			w,
@@ -296,12 +444,15 @@ func (h *Handler) sendResponse(w http.ResponseWriter, code int, status string, q
 		return
 	}
 
+	links := models.PageLinks{}
 	res := models.Response{
-		Status: status,
-		Page:   page,
-		Limit:  limit,
-		Total:  total,
-		Data:   data,
+		Status:     status,
+		Page:       page,
+		Limit:      limit,
+		Total:      total,
+		TotalPages: int(math.Ceil(float64(total) / float64(limit))),
+		Links:      links,
+		Data:       data,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -329,4 +480,12 @@ func (h *Handler) removeAllWhitespaces(s string) string {
 		return r
 	}, s)
 	return trim
+}
+
+func (h *Handler) sendToken(w http.ResponseWriter, statusCode int, token *models.AuthCredential) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if err := json.NewEncoder(w).Encode(token); err != nil {
+		log.Printf("Unable to write response: %v", err)
+	}
 }
