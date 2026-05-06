@@ -31,7 +31,7 @@ func (h *Handler) Routes() *http.ServeMux {
 	)
 	mux.Handle(
 		"GET /api/profiles/export",
-		mw.Auth(http.HandlerFunc(h.HandFileExport))
+		mw.Auth(http.HandlerFunc(h.HandleDataExport)),
 	)
 	mux.Handle(
 		"DELETE /api/profiles/{id}",

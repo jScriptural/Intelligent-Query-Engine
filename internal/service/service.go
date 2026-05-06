@@ -33,6 +33,7 @@ type Store interface {
 	GetUserProfileByID(ctx context.Context, id string) (*models.UserProfile, error)
 	GetToken(ctx context.Context, id string) (*models.RefreshToken, error)
 	UpdateUserTokenByID(ctx context.Context, userID, token string) error
+	GetUserProfileByGithubID(ctx context.Context, githubID string) (*models.UserProfile, error)
 }
 
 type Service struct {
@@ -43,7 +44,7 @@ type Service struct {
 func NewService(s Store) *Service {
 	return &Service{
 		store:  s,
-		client: &http.Client{Timeout: 20 * time.Second},
+		client: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -337,24 +338,36 @@ func (s *Service) GetAuthCredential(ctx context.Context, gtc models.GitTmpCode) 
 			ghProfile.Email = email
 		}
 	}
+
+	u, err := s.store.GetUserProfileByGithubID(ctx, strconv.FormatInt(ghProfile.GithubID, 10))
+	if err != nil {
+		if errors.Is(err, models.ErrNoUser) {
+			log.Printf("No user with github_id: %d", ghProfile.GithubID)
+		} else {
+			return nil, fmt.Errorf("GetAuthCredential: %w", err)
+		}
+	}
+	role := "analyst"
+
+	if u != nil {
+		role = u.Role
+	}
+
 	log.Println("Creating user profile")
 	id, _ := uuid.NewV7()
-	log.Printf("Auth: id - %v", id.String())
 	user := models.UserProfile{
 		ID:          id,
 		GithubID:    strconv.FormatInt(ghProfile.GithubID, 10),
 		Username:    ghProfile.Username,
 		Email:       ghProfile.Email,
 		AvatarURL:   ghProfile.AvatarURL,
-		Role:        "analyst",
+		Role:        role,
 		IsActive:    true,
 		LastLoginAt: time.Now().UTC(),
 		CreatedAt:   time.Now().UTC(),
 	}
 
-	log.Printf("user: %#v", user)
-	log.Println("Generating credentials")
-	authCred, err := s.GenerateCredential(user.ID, user.Username, "analyst")
+	authCred, err := s.GenerateCredential(user.ID, user.Username, role)
 	if err != nil {
 		log.Println(err)
 		return nil, fmt.Errorf("GetAuthCredential: %w", err)
@@ -368,7 +381,7 @@ func (s *Service) GetAuthCredential(ctx context.Context, gtc models.GitTmpCode) 
 
 		return nil, fmt.Errorf("GetAuthCredential: %w", err)
 	}
-	log.Println("return cred")
+
 	return authCred, nil
 
 }
@@ -383,14 +396,14 @@ func (s *Service) RevokeToken(ctx context.Context, u *models.UserID) error {
 	return nil
 }
 
-func (s *Service) UpdateUserToken(ctx context.Context,id, token string) error {
+func (s *Service) UpdateUserToken(ctx context.Context, id, token string) error {
 
-	err := s.store.UpdateUserTokenByID(ctx,id,token);
+	err := s.store.UpdateUserTokenByID(ctx, id, token)
 	if err != nil {
-		return err;
+		return err
 	}
 
-	return nil;
+	return nil
 }
 
 func (s *Service) ValidateToken(ctx context.Context, tk string, claims *models.RefreshClaims) (*models.UserProfile, error) {

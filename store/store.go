@@ -253,7 +253,6 @@ FROM profile`)
 	stmt := qc.String()
 
 	log.Printf("built querystring: %v", stmt)
-	log.Printf("args: %#v", args)
 	rows, err := d.DB.QueryContext(ctx, stmt, args...)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -494,6 +493,40 @@ func (d *DBHandler) GetUserProfileByID(ctx context.Context, id string) (*models.
 	return &u, nil
 }
 
+
+
+func (d *DBHandler) GetUserProfileByGithubID(ctx context.Context, id string) (*models.UserProfile, error) {
+	u := models.UserProfile{}
+	stmt := `SELECT id,github_id,username,email,avatar_url,is_active,role,last_login_at,created_at
+	FROM user
+	WhERE github_id = ?
+	LIMIT 1;`
+
+	err := d.DB.QueryRowContext(ctx, stmt, id).Scan(
+		&u.ID,
+		&u.GithubID,
+		&u.Username,
+		&u.Email,
+		&u.AvatarURL,
+		&u.IsActive,
+		&u.Role,
+		&u.LastLoginAt,
+		&u.CreatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("GetUserProfile: %w", models.ErrNoUser)
+		}
+		return nil, fmt.Errorf("GetUserProfile: %w", err)
+	}
+
+	return &u, nil
+}
+
+
+
+
 func (d *DBHandler) UpdateUserTokenByID(ctx context.Context, id, tk string) error {
 	stmt := `UPDATE refresh_token 
 	SET token = ? 
@@ -513,6 +546,7 @@ func (d *DBHandler) UpdateUserTokenByID(ctx context.Context, id, tk string) erro
 	}
 	return nil;
 }
+
 
 
 /*************************************

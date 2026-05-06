@@ -16,6 +16,8 @@ import (
 func CORS(h http.Handler, config map[string]string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("clientIP: %v\n", r.RemoteAddr)
+		log.Printf("Endpoint: %v",r.URL.String())
+		log.Printf("Method: %v",r.Method)
 		for k, v := range config {
 			w.Header().Set(k, v)
 		}
@@ -32,8 +34,6 @@ func Auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		val := r.Header.Get("X-API-Version")
 		if val == "" || val != "1"{
-			log.Printf("val: %#v",val)
-			log.Printf("val: %#v",r.Header)
 			w.Header().Set("Content", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			if err := json.NewEncoder(w).Encode(models.ErrResponse{Status: "error", Message: "API version header required"}); err != nil {
@@ -97,6 +97,5 @@ func getBearerToken(r *http.Request) string {
 		return ""
 	}
 
-	log.Println("Authomatch: ", m)
 	return m[1]
 }

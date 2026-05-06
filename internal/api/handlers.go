@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,11 +10,13 @@ import (
 	"intelliqe/internal/service"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
-	"math"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -26,10 +29,10 @@ func NewHandler(s *service.Service) *Handler {
 }
 
 func (h *Handler) HandleQuery(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Ctx: %#v", r.Context())
+	start := time.Now();
+	defer h.logResponseTime(start);
 
 	query := r.URL.Query()
-	log.Printf("query: %v", query)
 
 	p, total, err := h.svc.Filter(r.Context(), query)
 
@@ -51,10 +54,11 @@ func (h *Handler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleNLP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now();
+	defer h.logResponseTime(start);
+
 	query := r.URL.Query()
 	nl := query.Get("q")
-	log.Printf("q: %v", nl)
-	log.Printf("query: %v", query)
 
 	if nl != "" {
 		delete(query, "q")
@@ -79,6 +83,9 @@ func (h *Handler) HandleNLP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	start := time.Now();
+	defer h.logResponseTime(start);
+
 	h.sendError(
 		w,
 		http.StatusOK,
@@ -88,6 +95,9 @@ func (h *Handler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleProfileCreation(w http.ResponseWriter, r *http.Request) {
+	start := time.Now();
+	defer h.logResponseTime(start);
+
 	role := r.Context().Value("role")
 	if role != "admin" {
 		log.Println("role: ", role)
@@ -95,12 +105,13 @@ func (h *Handler) HandleProfileCreation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer r.Body.Close()
+
 	var data models.PostData
 	if err := h.decode(r.Body, &data); err != nil {
 		log.Printf("%v", err)
 		h.errorMux(
 			w,
-			fmt.Errorf("HandleProfileCreation: %w", models.Err502),
+			models.Err502,
 		)
 
 		return
@@ -110,7 +121,7 @@ func (h *Handler) HandleProfileCreation(w http.ResponseWriter, r *http.Request) 
 	if strings.TrimSpace(data.Name) == "" {
 		h.errorMux(
 			w,
-			fmt.Errorf("HandleProfileCreation: %w", models.ErrEmptyParam),
+			models.ErrEmptyParam,
 		)
 		return
 	}
@@ -152,11 +163,14 @@ func (h *Handler) HandleProfileCreation(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) HandleProfileRetrievalByID(w http.ResponseWriter, r *http.Request) {
+	start := time.Now();
+	defer h.logResponseTime(start);
+
 	id := h.removeAllWhitespaces(r.PathValue("id"))
 	if id == "" {
 		h.errorMux(
 			w,
-			fmt.Errorf("HandleProfileRetrievalByID: %w", models.ErrEmptyParam),
+			models.ErrEmptyParam,
 		)
 		return
 	}
@@ -184,6 +198,9 @@ func (h *Handler) HandleProfileRetrievalByID(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Request) {
+	start := time.Now();
+	defer h.logResponseTime(start);
+
 	role := r.Context().Value("role")
 	if role != "admin" {
 		log.Println("role: ", role)
@@ -196,7 +213,7 @@ func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Reque
 	if id == "" {
 		h.errorMux(
 			w,
-			fmt.Errorf("HandleProfileDeletion: %w", models.ErrEmptyParam),
+			models.ErrEmptyParam,
 		)
 		return
 	}
@@ -205,7 +222,7 @@ func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Reque
 		log.Printf("%v", err)
 		h.errorMux(
 			w,
-			fmt.Errorf("HandleProfileDeletion: %w", models.ErrInvalidParam),
+			models.ErrInvalidParam,
 		)
 		return
 	}
@@ -230,13 +247,16 @@ func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *Handler) HandleGithubOAuth(w http.ResponseWriter, r *http.Request) {
+	start := time.Now();
+	defer h.logResponseTime(start);
+
 	tmpCode := models.GitTmpCode{}
 	err := h.decode(r.Body, &tmpCode)
 	if err != nil {
 		log.Println(err)
 		h.errorMux(
 			w,
-			fmt.Errorf("HandleGithubOAuth: %w", models.ErrEmptyBody),
+			models.ErrEmptyBody,
 		)
 		return
 	}
@@ -252,6 +272,9 @@ func (h *Handler) HandleGithubOAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	start := time.Now();
+	defer h.logResponseTime(start);
+
 	defer r.Body.Close()
 	userID := models.UserID{}
 	err := h.decode(r.Body, &userID)
@@ -274,6 +297,9 @@ func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleSessionRefresh(w http.ResponseWriter, r *http.Request) {
+	start := time.Now();
+	defer h.logResponseTime(start);
+
 	refreshToken := models.RefreshToken{}
 	err := h.decode(r.Body, &refreshToken)
 	if err != nil {
@@ -301,7 +327,7 @@ func (h *Handler) HandleSessionRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.svc.UpdateUserToken(r.Context(),user.ID.String(),cred.RefreshToken)
+	err = h.svc.UpdateUserToken(r.Context(), user.ID.String(), cred.RefreshToken)
 	if err != nil {
 		log.Println(err)
 		h.errorMux(w, err)
@@ -311,9 +337,61 @@ func (h *Handler) HandleSessionRefresh(w http.ResponseWriter, r *http.Request) {
 	h.sendToken(w, http.StatusOK, cred)
 }
 
-func (h *Handler) HandleFileExport(w htpp.ResponseWriter, r *http.Request) {
-	
+func (h *Handler) HandleDataExport(w http.ResponseWriter, r *http.Request) {
+	start := time.Now();
+	defer h.logResponseTime(start);
+
+	supportedFormat := []string{"csv", "json"}
+
+	query := r.URL.Query()
+	format := query.Get("format")
+	log.Println("format:", format)
+
+	if format == "" {
+		h.errorMux(
+			w,
+			models.ErrEmptyParam,
+		)
+		return
+	}
+	format = strings.ToLower(format)
+	if !slices.Contains(supportedFormat, format) {
+		h.errorMux(
+			w,
+			models.ErrInvalidParam,
+		)
+		return
+	}
+	query.Del("format")
+	p, total, err := h.svc.Filter(r.Context(), query)
+	if err != nil {
+		log.Printf("HandleDataExport: %v", err)
+		h.errorMux(w, err)
+		return
+	}
+	if total == 0 {
+		h.errorMux(w, models.ErrNotFound)
+		return
+	}
+
+	switch format {
+	case "csv":
+		err := h.exportCSV(w, p)
+		if err != nil {
+			log.Printf("HandleDataExport: %v", err)
+			h.errorMux(w, err)
+			return
+		}
+	case "json":
+		err := h.exportJSON(w, p)
+		if err != nil {
+			log.Printf("HandleDataExport: %v", err)
+			h.errorMux(w, err)
+			return
+		}
+	}
 }
+
 /***************************************
 *                                      *
 *            HELPER FUNCS              *
@@ -488,4 +566,64 @@ func (h *Handler) sendToken(w http.ResponseWriter, statusCode int, token *models
 	if err := json.NewEncoder(w).Encode(token); err != nil {
 		log.Printf("Unable to write response: %v", err)
 	}
+}
+
+func (h *Handler) exportCSV(w http.ResponseWriter, p []*models.Profile) error {
+	cw := csv.NewWriter(w)
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("X-Content-Type-Option", "nosniff")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=%q", "profiles_"+strconv.FormatInt(time.Now().Unix(), 10)+".csv"))
+
+	w.WriteHeader(http.StatusOK)
+
+	for _, v := range p {
+		record := []string{
+			v.ID.String(),
+			v.Name,
+			v.Gender,
+			strconv.FormatFloat(v.GenderProbability, 'f', -1, 64),
+			strconv.Itoa(v.Age),
+			v.AgeGroup,
+			v.CountryID,
+			v.CountryName,
+			strconv.FormatFloat(v.CountryProbability, 'f', -1, 64),
+			v.CreatedAt.Format(time.RFC3339),
+		}
+		err := cw.Write(record)
+		if err != nil {
+			return fmt.Errorf("exportCSV: %w", err)
+		}
+
+	}
+	cw.Flush()
+
+	if cw.Error() != nil {
+		return fmt.Errorf("exportCSV: %w", cw.Error())
+	}
+
+	return nil
+}
+
+func (h *Handler) exportJSON(w http.ResponseWriter, p []*models.Profile) error {
+
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Option", "nosniff")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=%q", "profiles_"+strconv.FormatInt(time.Now().Unix(), 10)+".json"))
+
+	w.WriteHeader(http.StatusOK)
+
+	err := encoder.Encode(p)
+	if err != nil {
+		return fmt.Errorf("exportJSON: %w", err)
+	}
+
+	return nil
+}
+
+func (h *Handler)logResponseTime (start time.Time) {
+	log.Printf("Response time: %v",time.Since(start).String());
 }
