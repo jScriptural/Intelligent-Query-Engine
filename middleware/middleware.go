@@ -3,21 +3,35 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/golang-jwt/jwt/v5"
 	"intelliqe/internal/models"
 	"log"
 	"net/http"
 	"os"
 	"regexp"
-	//"slices"
-	"fmt"
+	"time"
 )
+
+type key string
+var userKey key
+
+func NewContext(ctx context.Context, u *models.UserInfo) context.Context {
+	return context.WithValue(ctx,userKey,u)
+}
+
+
+func FromContext(ctx context.Context) (*models.UserInfo, bool){
+	userInfo,ok := ctx.Value(userKey).(*models.UserInfo);
+
+	return userInfo, ok;
+}
 
 func CORS(h http.Handler, config map[string]string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("clientIP: %v\n", r.RemoteAddr)
-		log.Printf("Endpoint: %v",r.URL.String())
-		log.Printf("Method: %v",r.Method)
+		log.Printf("Endpoint: %v", r.URL.String())
+		log.Printf("Method: %v", r.Method)
 		for k, v := range config {
 			w.Header().Set(k, v)
 		}
@@ -33,7 +47,7 @@ func CORS(h http.Handler, config map[string]string) http.Handler {
 func Auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		val := r.Header.Get("X-API-Version")
-		if val == "" || val != "1"{
+		if val == "" || val != "1" {
 			w.Header().Set("Content", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			if err := json.NewEncoder(w).Encode(models.ErrResponse{Status: "error", Message: "API version header required"}); err != nil {
@@ -72,14 +86,35 @@ func Auth(next http.Handler) http.Handler {
 			if err := json.NewEncoder(w).Encode(models.ErrResponse{Status: "error", Message: "Authorization required"}); err != nil {
 				log.Printf("Auth: %v", err)
 			}
-			return;
+			return
 		}
 
-		ctx := context.WithValue(r.Context(), "username", claims.Username)
-		ctx = context.WithValue(ctx, "user_id", claims.UserID)
-		ctx = context.WithValue(ctx, "role", claims.Role)
+		userInfo := models.UserInfo{
+			UserID:   claims.UserID,
+			Username: claims.Username,
+			Role:     claims.Role,
+		}
 
+
+		ctx := NewContext(r.Context(),&userInfo)
+		b,_ := json.Marshal(userInfo)
+		log.Printf("usr: %s",b)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+
+}
+
+func ResponseTimer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t := time.Now().UTC()
+		defer func(t time.Time) {
+			log.Printf(
+				"Response time: %v",
+				time.Since(t).String(),
+			)
+		}(t)
+
+		next.ServeHTTP(w, r)
 	})
 
 }

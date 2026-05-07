@@ -139,12 +139,19 @@ type UserProfile struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+type UserInfo struct {
+	Username string    `json:"username"`
+	UserID   uuid.UUID `json:"user_id"`
+	Role     string    `json:"role"`
+}
+
 type AccessClaims struct {
 	Username string    `json:"username"`
 	UserID   uuid.UUID `json:"user_id"`
 	Role     string    `json:"role"`
 	jwt.RegisteredClaims
 }
+
 
 type RefreshClaims struct {
 	UserID uuid.UUID `json:"user_id"`
