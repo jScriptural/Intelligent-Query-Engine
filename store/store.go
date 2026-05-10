@@ -282,7 +282,7 @@ FROM profile`)
 	}
 	if rows.Err() != nil {
 		log.Printf("Err: %v", err)
-		return nil, 0, fmt.Errorf("GetProfiles: %w", rows.Err)
+		return nil, 0, fmt.Errorf("GetProfiles: %w", rows.Err())
 	}
 
 	if limit > totalCount {
