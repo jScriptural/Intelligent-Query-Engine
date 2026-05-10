@@ -3,52 +3,108 @@ package api
 import (
 	mw "intelliqe/middleware"
 	"net/http"
+	"time"
 )
 
 func (h *Handler) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc(
+	apiLimiter := mw.NewRateLimiter(60, 60*time.Second)
+	authLimiter := mw.NewRateLimiter(10, 60*time.Second)
+
+	mux.Handle(
 		"GET /",
-		h.HandleHealthCheck,
+		apiLimiter(
+			http.HandlerFunc(
+				h.HandleHealthCheck,
+			),
+		),
 	)
 
 	mux.Handle(
 		"GET /api/profiles",
-		mw.Auth(http.HandlerFunc(h.HandleQuery)),
+		mw.Auth(
+			apiLimiter(
+				http.HandlerFunc(
+					h.HandleQuery,
+				),
+			),
+		),
 	)
 	mux.Handle(
 		"GET /api/profiles/{id}",
-		mw.Auth(http.HandlerFunc(h.HandleProfileRetrievalByID)),
+		mw.Auth(
+			apiLimiter(
+				http.HandlerFunc(
+					h.HandleProfileRetrievalByID,
+				),
+			),
+		),
 	)
 	mux.Handle(
 		"GET /api/profiles/search",
-		mw.Auth(http.HandlerFunc(h.HandleNLP)),
+		mw.Auth(
+			apiLimiter(
+				http.HandlerFunc(
+					h.HandleNLP,
+				),
+			),
+		),
 	)
 	mux.Handle(
 		"POST /api/profiles",
-		mw.Auth(http.HandlerFunc(h.HandleProfileCreation)),
+		mw.Auth(
+			apiLimiter(
+				http.HandlerFunc(
+					h.HandleProfileCreation,
+				),
+			),
+		),
 	)
 	mux.Handle(
 		"GET /api/profiles/export",
-		mw.Auth(http.HandlerFunc(h.HandleDataExport)),
+		mw.Auth(
+			apiLimiter(
+				http.HandlerFunc(
+					h.HandleDataExport,
+				),
+			),
+		),
 	)
 	mux.Handle(
 		"DELETE /api/profiles/{id}",
-		mw.Auth(http.HandlerFunc(h.HandleProfileDeletionByID)),
+		mw.Auth(
+			apiLimiter(
+				http.HandlerFunc(
+					h.HandleProfileDeletionByID,
+				),
+			),
+		),
 	)
 
-	mux.HandleFunc(
+	mux.Handle(
 		"POST /auth/github",
-		h.HandleGithubOAuth,
+		authLimiter(
+			http.HandlerFunc(
+				h.HandleGithubOAuth,
+			),
+		),
 	)
-	mux.HandleFunc(
+	mux.Handle(
 		"POST /auth/logout",
-		h.HandleLogout,
+		authLimiter(
+			http.HandlerFunc(
+				h.HandleLogout,
+			),
+		),
 	)
-	mux.HandleFunc(
+	mux.Handle(
 		"POST /auth/refresh",
-		h.HandleSessionRefresh,
+		authLimiter(
+			http.HandlerFunc(
+				h.HandleSessionRefresh,
+			),
+		),
 	)
 
 	return mux

@@ -52,9 +52,6 @@ func (h *Handler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleNLP(w http.ResponseWriter, r *http.Request) {
-	/*start := time.Now();
-	defer h.logResponseTime(start);*/
-
 	query := r.URL.Query()
 	nl := query.Get("q")
 
@@ -81,9 +78,6 @@ func (h *Handler) HandleNLP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
-	/*start := time.Now();
-	defer h.logResponseTime(start);*/
-
 	h.sendError(
 		w,
 		http.StatusOK,
@@ -93,11 +87,9 @@ func (h *Handler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleProfileCreation(w http.ResponseWriter, r *http.Request) {
-	/*start := time.Now();
-	defer h.logResponseTime(start);*/
 	u, ok := mw.FromContext(r.Context())
 	if !ok {
-		h.errorMux(w,models.ErrForbidden)
+		h.errorMux(w, models.ErrForbidden)
 		return
 	}
 	if u.Role != "admin" {
@@ -165,9 +157,6 @@ func (h *Handler) HandleProfileCreation(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) HandleProfileRetrievalByID(w http.ResponseWriter, r *http.Request) {
-	/*start := time.Now();
-	defer h.logResponseTime(start);*/
-
 	id := h.removeAllWhitespaces(r.PathValue("id"))
 	if id == "" {
 		h.errorMux(
@@ -200,11 +189,9 @@ func (h *Handler) HandleProfileRetrievalByID(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Request) {
-	/*start := time.Now();
-	defer h.logResponseTime(start);*/
 	u, ok := mw.FromContext(r.Context())
 	if !ok {
-		h.errorMux(w,models.ErrForbidden)
+		h.errorMux(w, models.ErrForbidden)
 		return
 	}
 	if u.Role != "admin" {
@@ -253,9 +240,6 @@ func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *Handler) HandleGithubOAuth(w http.ResponseWriter, r *http.Request) {
-	/*start := time.Now();
-	defer h.logResponseTime(start);*/
-
 	tmpCode := models.GitTmpCode{}
 	err := h.decode(r.Body, &tmpCode)
 	if err != nil {
@@ -278,8 +262,6 @@ func (h *Handler) HandleGithubOAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
-	/*start := time.Now();
-	defer h.logResponseTime(start);*/
 
 	defer r.Body.Close()
 	userID := models.UserID{}
@@ -303,8 +285,6 @@ func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleSessionRefresh(w http.ResponseWriter, r *http.Request) {
-	/*start := time.Now();
-	defer h.logResponseTime(start);*/
 
 	refreshToken := models.RefreshToken{}
 	err := h.decode(r.Body, &refreshToken)
@@ -344,10 +324,11 @@ func (h *Handler) HandleSessionRefresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleDataExport(w http.ResponseWriter, r *http.Request) {
-	/*start := time.Now();
-	defer h.logResponseTime(start);*/
 
-	supportedFormat := []string{"csv", "json"}
+	supportedFormat := []string{
+		"csv",
+		"json",
+	}
 
 	query := r.URL.Query()
 	format := query.Get("format")
@@ -629,7 +610,3 @@ func (h *Handler) exportJSON(w http.ResponseWriter, p []*models.Profile) error {
 
 	return nil
 }
-
-/*func (h *Handler)logResponseTime (start time.Time) {
-	log.Printf("Response time: %v",time.Since(start).String());
-}*/

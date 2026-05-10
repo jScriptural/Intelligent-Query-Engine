@@ -17,21 +17,22 @@ type key string
 var userKey key
 
 func NewContext(ctx context.Context, u *models.UserInfo) context.Context {
-	return context.WithValue(ctx,userKey,u)
+	return context.WithValue(ctx, userKey, u)
 }
 
+func FromContext(ctx context.Context) (*models.UserInfo, bool) {
+	userInfo, ok := ctx.Value(userKey).(*models.UserInfo)
 
-func FromContext(ctx context.Context) (*models.UserInfo, bool){
-	userInfo,ok := ctx.Value(userKey).(*models.UserInfo);
-
-	return userInfo, ok;
+	return userInfo, ok
 }
 
 func CORS(h http.Handler, config map[string]string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("clientIP: %v\n", r.RemoteAddr)
-		log.Printf("Endpoint: %v", r.URL.String())
+		log.Printf("URI: %v", r.URL.RequestURI())
+		log.Printf("path: %v", r.URL.Path)
 		log.Printf("Method: %v", r.Method)
+
 		for k, v := range config {
 			w.Header().Set(k, v)
 		}
@@ -95,10 +96,9 @@ func Auth(next http.Handler) http.Handler {
 			Role:     claims.Role,
 		}
 
-
-		ctx := NewContext(r.Context(),&userInfo)
-		b,_ := json.Marshal(userInfo)
-		log.Printf("usr: %s",b)
+		ctx := NewContext(r.Context(), &userInfo)
+		b, _ := json.Marshal(userInfo)
+		log.Printf("usr: %s", b)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 
