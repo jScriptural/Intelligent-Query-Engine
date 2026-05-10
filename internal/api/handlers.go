@@ -442,7 +442,7 @@ func (h *Handler) errorMux(w http.ResponseWriter, err error) {
 			w,
 			http.StatusUnauthorized,
 			"error",
-			"Operation not authorized",
+			"Authentication required",
 		)
 	case errors.Is(err, models.ErrExpiredToken):
 		h.sendError(
@@ -456,7 +456,7 @@ func (h *Handler) errorMux(w http.ResponseWriter, err error) {
 			w,
 			http.StatusForbidden,
 			"error",
-			"Permission denied",
+			"Permission denied: Authorization required",
 		)
 	case errors.Is(err, models.ErrNoSession):
 		h.sendError(
@@ -483,6 +483,7 @@ func (h *Handler) errorMux(w http.ResponseWriter, err error) {
 }
 
 func (h *Handler) sendError(w http.ResponseWriter, code int, status, msg string) {
+	log.Println("Response status:",code)
 	err := models.ErrResponse{
 		Status:  status,
 		Message: msg,
@@ -602,6 +603,7 @@ func (h *Handler) exportJSON(w http.ResponseWriter, p []*models.Profile) error {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=%q", "profiles_"+strconv.FormatInt(time.Now().Unix(), 10)+".json"))
 
 	w.WriteHeader(http.StatusOK)
+
 
 	err := encoder.Encode(p)
 	if err != nil {
