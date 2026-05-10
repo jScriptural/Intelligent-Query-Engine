@@ -10,11 +10,12 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"time"
 	"strings"
+	"time"
 )
 
 type key string
+
 var userKey key
 
 func NewContext(ctx context.Context, u *models.UserInfo) context.Context {
@@ -29,7 +30,7 @@ func FromContext(ctx context.Context) (*models.UserInfo, bool) {
 
 func CORS(h http.Handler, config map[string]string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("clientIP: %v\n",getRealClientIP(r))
+		log.Printf("clientIP: %v\n", getRealClientIP(r))
 		log.Printf("URI: %v", r.URL.RequestURI())
 		log.Printf("path: %v", r.URL.Path)
 		log.Printf("Method: %v", r.Method)
@@ -98,7 +99,7 @@ func Auth(next http.Handler) http.Handler {
 		}
 
 		ctx := NewContext(r.Context(), &userInfo)
-		b, _ := json.MarshalIndent(userInfo,"" " ")
+		b, _ := json.MarshalIndent(userInfo, "", " ")
 		log.Printf("usr: %s", b)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -143,20 +144,20 @@ func getRealClientIP(r *http.Request) string {
 		"X-REAL-IP",
 		"CF-Connecting-IP",
 		"X-Forwarded",
-		"Forwarded-For"
+		"Forwarded-For",
 	}
 
-	for _,header := range headers {
+	for _, header := range headers {
 		if v := r.Header.Get(header); v != "" {
-			ips := strings.Split(v,",")
+			ips := strings.Split(v, ",")
 			if len(ips) > 0 {
-				ip := strings.TrimSpace(ips[0]);
+				ip := strings.TrimSpace(ips[0])
 				if ip != "" {
-					return ip;
+					return ip
 				}
 			}
 		}
 	}
 
-	return strings.Split(r.RemoteAddr,":")[0]
+	return strings.Split(r.RemoteAddr, ":")[0]
 }
