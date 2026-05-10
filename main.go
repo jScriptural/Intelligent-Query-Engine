@@ -38,7 +38,7 @@ func main() {
 	mux := handler.Routes()
 	server := http.Server{
 		Addr:    ":" + PORT,
-		Handler: mw.CORS(mux, corsConfig),
+		Handler: mw.ResponseTimer(mw.CORS(mux, corsConfig)),
 	}
 
 	log.Printf("Server is listening at: %v\n Database file: %v\n", server.Addr, DATABASE_URL)

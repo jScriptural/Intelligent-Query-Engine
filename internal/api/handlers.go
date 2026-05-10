@@ -1,18 +1,23 @@
 package api
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
 	"intelliqe/internal/models"
 	"intelliqe/internal/service"
+	mw "intelliqe/middleware"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -26,7 +31,6 @@ func NewHandler(s *service.Service) *Handler {
 
 func (h *Handler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	log.Printf("query: %v", query)
 
 	p, total, err := h.svc.Filter(r.Context(), query)
 
@@ -50,8 +54,6 @@ func (h *Handler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleNLP(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	nl := query.Get("q")
-	log.Printf("q: %v", nl)
-	log.Printf("query: %v", query)
 
 	if nl != "" {
 		delete(query, "q")
@@ -85,13 +87,25 @@ func (h *Handler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleProfileCreation(w http.ResponseWriter, r *http.Request) {
+	u, ok := mw.FromContext(r.Context())
+	if !ok {
+		h.errorMux(w, models.ErrForbidden)
+		return
+	}
+	if u.Role != "admin" {
+		log.Println("role: ", u.Role)
+		h.errorMux(w, models.ErrForbidden)
+		return
+	}
+
 	defer r.Body.Close()
+
 	var data models.PostData
 	if err := h.decode(r.Body, &data); err != nil {
 		log.Printf("%v", err)
 		h.errorMux(
 			w,
-			fmt.Errorf("HandleProfileCreation: %w", models.Err502),
+			models.Err502,
 		)
 
 		return
@@ -101,7 +115,7 @@ func (h *Handler) HandleProfileCreation(w http.ResponseWriter, r *http.Request) 
 	if strings.TrimSpace(data.Name) == "" {
 		h.errorMux(
 			w,
-			fmt.Errorf("HandleProfileCreation: %w", models.ErrEmptyParam),
+			models.ErrEmptyParam,
 		)
 		return
 	}
@@ -133,7 +147,7 @@ func (h *Handler) HandleProfileCreation(w http.ResponseWriter, r *http.Request) 
 
 	h.sendResponse(
 		w,
-		http.StatusCreated,
+		http.StatusOK,
 		"success",
 		q,
 		total,
@@ -147,7 +161,7 @@ func (h *Handler) HandleProfileRetrievalByID(w http.ResponseWriter, r *http.Requ
 	if id == "" {
 		h.errorMux(
 			w,
-			fmt.Errorf("HandleProfileRetrievalByID: %w", models.ErrEmptyParam),
+			models.ErrEmptyParam,
 		)
 		return
 	}
@@ -175,6 +189,16 @@ func (h *Handler) HandleProfileRetrievalByID(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Request) {
+	u, ok := mw.FromContext(r.Context())
+	if !ok {
+		h.errorMux(w, models.ErrForbidden)
+		return
+	}
+	if u.Role != "admin" {
+		log.Println("role: ", u.Role)
+		h.errorMux(w, models.ErrForbidden)
+		return
+	}
 
 	id := r.PathValue("id")
 	id = h.removeAllWhitespaces(id)
@@ -182,7 +206,7 @@ func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Reque
 	if id == "" {
 		h.errorMux(
 			w,
-			fmt.Errorf("HandleProfileDeletion: %w", models.ErrEmptyParam),
+			models.ErrEmptyParam,
 		)
 		return
 	}
@@ -191,7 +215,7 @@ func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Reque
 		log.Printf("%v", err)
 		h.errorMux(
 			w,
-			fmt.Errorf("HandleProfileDeletion: %w", models.ErrInvalidParam),
+			models.ErrInvalidParam,
 		)
 		return
 	}
@@ -213,6 +237,146 @@ func (h *Handler) HandleProfileDeletionByID(w http.ResponseWriter, r *http.Reque
 		nil,
 	)
 
+}
+
+func (h *Handler) HandleGithubOAuth(w http.ResponseWriter, r *http.Request) {
+	tmpCode := models.GitTmpCode{}
+	err := h.decode(r.Body, &tmpCode)
+	if err != nil {
+		log.Println(err)
+		h.errorMux(
+			w,
+			models.ErrEmptyBody,
+		)
+		return
+	}
+
+	token, err := h.svc.GetAuthCredential(r.Context(), tmpCode)
+	if err != nil {
+		log.Println(err)
+		h.errorMux(w, err)
+		return
+	}
+
+	h.sendToken(w, http.StatusOK, token)
+}
+
+func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
+
+	defer r.Body.Close()
+	userID := models.UserID{}
+	err := h.decode(r.Body, &userID)
+	if err != nil {
+		log.Printf("%#v\n", err)
+		h.errorMux(
+			w,
+			err,
+		)
+		return
+	}
+
+	err = h.svc.RevokeToken(r.Context(), &userID)
+	if err != nil {
+		log.Printf("%#v\n", err)
+		h.errorMux(w, err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) HandleSessionRefresh(w http.ResponseWriter, r *http.Request) {
+
+	refreshToken := models.RefreshToken{}
+	err := h.decode(r.Body, &refreshToken)
+	if err != nil {
+		log.Println(err)
+		h.errorMux(
+			w,
+			models.ErrEmptyBody,
+		)
+		return
+	}
+
+	claims := models.RefreshClaims{}
+
+	user, err := h.svc.ValidateToken(r.Context(), refreshToken.Token, &claims)
+	if err != nil {
+		log.Println(err)
+		h.errorMux(w, err)
+		return
+	}
+
+	cred, err := h.svc.GenerateCredential(user.ID, user.Username, user.Role)
+	if err != nil {
+		log.Printf("%v", err)
+		h.errorMux(w, err)
+		return
+	}
+
+	err = h.svc.UpdateUserToken(r.Context(), user.ID.String(), cred.RefreshToken)
+	if err != nil {
+		log.Println(err)
+		h.errorMux(w, err)
+		return
+	}
+
+	h.sendToken(w, http.StatusOK, cred)
+}
+
+func (h *Handler) HandleDataExport(w http.ResponseWriter, r *http.Request) {
+
+	supportedFormat := []string{
+		"csv",
+		"json",
+	}
+
+	query := r.URL.Query()
+	format := query.Get("format")
+	log.Println("format:", format)
+
+	if format == "" {
+		h.errorMux(
+			w,
+			models.ErrEmptyParam,
+		)
+		return
+	}
+	format = strings.ToLower(format)
+	if !slices.Contains(supportedFormat, format) {
+		h.errorMux(
+			w,
+			models.ErrInvalidParam,
+		)
+		return
+	}
+	query.Del("format")
+	p, total, err := h.svc.Filter(r.Context(), query)
+	if err != nil {
+		log.Printf("HandleDataExport: %v", err)
+		h.errorMux(w, err)
+		return
+	}
+	if total == 0 {
+		h.errorMux(w, models.ErrNotFound)
+		return
+	}
+
+	switch format {
+	case "csv":
+		err := h.exportCSV(w, p)
+		if err != nil {
+			log.Printf("HandleDataExport: %v", err)
+			h.errorMux(w, err)
+			return
+		}
+	case "json":
+		err := h.exportJSON(w, p)
+		if err != nil {
+			log.Printf("HandleDataExport: %v", err)
+			h.errorMux(w, err)
+			return
+		}
+	}
 }
 
 /***************************************
@@ -259,6 +423,55 @@ func (h *Handler) errorMux(w http.ResponseWriter, err error) {
 			"error",
 			"Unable to interprete query",
 		)
+	case errors.Is(err, models.ErrEmptyBody):
+		h.sendError(
+			w,
+			http.StatusBadRequest,
+			"error",
+			"Empty Request body",
+		)
+	case errors.Is(err, models.ErrDeadlineExceeded):
+		h.sendError(
+			w,
+			http.StatusBadRequest,
+			"error",
+			"Request timeout",
+		)
+	case errors.Is(err, models.ErrUnauthorized):
+		h.sendError(
+			w,
+			http.StatusUnauthorized,
+			"error",
+			"Operation not authorized",
+		)
+	case errors.Is(err, models.ErrExpiredToken):
+		h.sendError(
+			w,
+			http.StatusUnauthorized,
+			"error",
+			"Session expired",
+		)
+	case errors.Is(err, models.ErrForbidden):
+		h.sendError(
+			w,
+			http.StatusForbidden,
+			"error",
+			"Permission denied",
+		)
+	case errors.Is(err, models.ErrNoSession):
+		h.sendError(
+			w,
+			http.StatusUnauthorized,
+			"error",
+			"No session",
+		)
+	case errors.Is(err, models.ErrNoUser):
+		h.sendError(
+			w,
+			http.StatusUnauthorized,
+			"error",
+			"No user",
+		)
 	default:
 		h.sendError(
 			w,
@@ -296,12 +509,15 @@ func (h *Handler) sendResponse(w http.ResponseWriter, code int, status string, q
 		return
 	}
 
+	links := models.PageLinks{}
 	res := models.Response{
-		Status: status,
-		Page:   page,
-		Limit:  limit,
-		Total:  total,
-		Data:   data,
+		Status:     status,
+		Page:       page,
+		Limit:      limit,
+		Total:      total,
+		TotalPages: int(math.Ceil(float64(total) / float64(limit))),
+		Links:      links,
+		Data:       data,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -329,4 +545,68 @@ func (h *Handler) removeAllWhitespaces(s string) string {
 		return r
 	}, s)
 	return trim
+}
+
+func (h *Handler) sendToken(w http.ResponseWriter, statusCode int, token *models.AuthCredential) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if err := json.NewEncoder(w).Encode(token); err != nil {
+		log.Printf("Unable to write response: %v", err)
+	}
+}
+
+func (h *Handler) exportCSV(w http.ResponseWriter, p []*models.Profile) error {
+	cw := csv.NewWriter(w)
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("X-Content-Type-Option", "nosniff")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=%q", "profiles_"+strconv.FormatInt(time.Now().Unix(), 10)+".csv"))
+
+	w.WriteHeader(http.StatusOK)
+
+	for _, v := range p {
+		record := []string{
+			v.ID.String(),
+			v.Name,
+			v.Gender,
+			strconv.FormatFloat(v.GenderProbability, 'f', -1, 64),
+			strconv.Itoa(v.Age),
+			v.AgeGroup,
+			v.CountryID,
+			v.CountryName,
+			strconv.FormatFloat(v.CountryProbability, 'f', -1, 64),
+			v.CreatedAt.Format(time.RFC3339),
+		}
+		err := cw.Write(record)
+		if err != nil {
+			return fmt.Errorf("exportCSV: %w", err)
+		}
+
+	}
+	cw.Flush()
+
+	if cw.Error() != nil {
+		return fmt.Errorf("exportCSV: %w", cw.Error())
+	}
+
+	return nil
+}
+
+func (h *Handler) exportJSON(w http.ResponseWriter, p []*models.Profile) error {
+
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Option", "nosniff")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=%q", "profiles_"+strconv.FormatInt(time.Now().Unix(), 10)+".json"))
+
+	w.WriteHeader(http.StatusOK)
+
+	err := encoder.Encode(p)
+	if err != nil {
+		return fmt.Errorf("exportJSON: %w", err)
+	}
+
+	return nil
 }

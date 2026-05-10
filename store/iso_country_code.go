@@ -247,12 +247,10 @@ var ISOCountryCode = map[string]string{
 	"ZA": "South Africa",
 	"ZM": "Zambia",
 	"ZW": "Zimbabwe",
-
 }
 
+func (d *DBHandler) GetCountryName(code string) (string, bool) {
+	cn, ok := ISOCountryCode[code]
 
-func (d *DBHandler) GetCountryName(code string) (string,bool) {
-	cn,ok := ISOCountryCode[code];
-
-	return cn,ok;
+	return cn, ok
 }
