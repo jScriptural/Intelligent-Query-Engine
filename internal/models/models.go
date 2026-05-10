@@ -28,7 +28,7 @@ type Profile struct {
 }
 
 type PostData struct {
-	Name string `json"name"`
+	Name string `json:"name"`
 }
 
 type Response struct {
