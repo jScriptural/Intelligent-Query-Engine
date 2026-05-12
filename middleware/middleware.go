@@ -149,6 +149,7 @@ func getRealClientIP(r *http.Request) string {
 
 	for _, header := range headers {
 		if v := r.Header.Get(header); v != "" {
+			log.Printf("%v:%v",header,v)
 			ips := strings.Split(v, ",")
 			if len(ips) > 0 {
 				ip := strings.TrimSpace(ips[0])
