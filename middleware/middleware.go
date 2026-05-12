@@ -139,17 +139,19 @@ func getBearerToken(r *http.Request) string {
 
 func getRealClientIP(r *http.Request) string {
 	headers := []string{
+		"X-REAL-IP",
 		"X-Forwarded-For",
 		"X-Client-IP",
-		"X-REAL-IP",
 		"CF-Connecting-IP",
 		"X-Forwarded",
 		"Forwarded-For",
 	}
 
+	for k,v := range r.Header {
+		log.Printf("%v:%v",k,v)
+	}
 	for _, header := range headers {
 		if v := r.Header.Get(header); v != "" {
-			log.Printf("%v:%v",header,v)
 			ips := strings.Split(v, ",")
 			if len(ips) > 0 {
 				ip := strings.TrimSpace(ips[0])
